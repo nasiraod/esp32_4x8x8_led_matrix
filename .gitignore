@@ -1,0 +1,7 @@
+# PlatformIO build output and downloaded libraries
+.pio/
+
+# VSCode files PlatformIO regenerates (they contain absolute paths)
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch/
