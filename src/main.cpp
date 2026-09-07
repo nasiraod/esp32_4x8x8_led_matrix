@@ -150,7 +150,11 @@ void loop() {
   }
   loopsThisWindow++;
 
-  g_loopCount++;          // watched by monitorTask on the other core
+  // Read-modify-write rather than ++: C++20 deprecates increment on a
+  // volatile-qualified object. Aligned 32-bit accesses are atomic on Xtensa,
+  // and monitorTask only checks whether this changed, so a torn value would
+  // be harmless anyway.
+  g_loopCount = g_loopCount + 1;   // watched by monitorTask on the other core
   esp_task_wdt_reset();
 
   stage(1); Net::tick();
