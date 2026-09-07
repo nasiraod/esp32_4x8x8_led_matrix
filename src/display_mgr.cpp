@@ -72,7 +72,49 @@ static bool     g_dirty      = true;
 static uint32_t g_nextStep   = 0;
 static uint32_t g_nextEval   = 0;
 
+// Countdown timer state.
+static uint32_t g_tmDuration = 5 * 60 * 1000UL;   // default 5 minutes
+static uint32_t g_tmRemain   = 5 * 60 * 1000UL;   // banked remaining when stopped
+static uint32_t g_tmStart    = 0;                 // millis() at the last start
+static bool     g_tmRunning  = false;
+static uint32_t g_tmDoneAt   = 0;                 // when it hit zero, for blinking
+
+// Settings are written to NVS on a short delay rather than on every change.
+// OTA progress calls setMessage() about a hundred times per update, and the
+// stopwatch/clock change content constantly - coalescing avoids that many flash
+// writes while still surviving a power cut a couple of seconds later.
+static bool     g_saveDirty  = false;
+static uint32_t g_saveAt     = 0;
+#define SAVE_DELAY_MS 2000UL
+
+static void markSave() { g_saveDirty = true; g_saveAt = millis() + SAVE_DELAY_MS; }
+
 // ---------------------------------------------------------------------------
+
+static uint32_t timerRemainRaw() {
+  if (!g_tmRunning) return g_tmRemain;
+  const uint32_t gone = millis() - g_tmStart;
+  return (gone >= g_tmRemain) ? 0 : (g_tmRemain - gone);
+}
+
+// M:SS above a minute, SS.h below it - tenths only matter near the end.
+// At zero it blinks DONE for half a minute, then holds it steady.
+static String formatTimer() {
+  const uint32_t ms = timerRemainRaw();
+  if (ms == 0) {
+    if (g_tmDoneAt && (millis() - g_tmDoneAt) < 30000UL &&
+        ((millis() / 500) & 1))
+      return String("");                       // blink off
+    return String("DONE");
+  }
+  char out[16];
+  const uint32_t sec = ms / 1000;
+  if (sec >= 60) snprintf(out, sizeof(out), "%lu:%02lu",
+                          (unsigned long)(sec / 60), (unsigned long)(sec % 60));
+  else           snprintf(out, sizeof(out), "%lu.%lu",
+                          (unsigned long)sec, (unsigned long)((ms % 1000) / 100));
+  return String(out);
+}
 
 static String formatStopwatch() {
   const uint32_t ms  = swElapsedMs();
@@ -108,6 +150,7 @@ static String formatClock() {
 
 static String currentText() {
   switch (g_mode) {
+    case MODE_TIMER:     return formatTimer();
     case MODE_STOPWATCH: return formatStopwatch();
     case MODE_CLOCK:     return formatClock();
     default:             return (g_messageSet || g_status.isEmpty()) ? g_message : g_status;
@@ -378,7 +421,7 @@ static void build(const String &s) {
       if (buildBigDigits(s, 5)) return;
     }
   }
-  if (g_mode == MODE_STOPWATCH) {
+  if (g_mode == MODE_STOPWATCH || g_mode == MODE_TIMER) {
     if (buildBigDigits(s, 5)) return;
   }
   // Text may opt into the tall digit fonts, but only a numeric message can use
@@ -468,6 +511,23 @@ static bool decideScroll() {
 
 // ---------------------------------------------------------------------------
 
+static void saveSettings() {
+  g_prefs.putUChar("mode",     (uint8_t)g_mode);
+  g_prefs.putUChar("font",     (uint8_t)g_textFont);
+  g_prefs.putUChar("just",     (uint8_t)g_just);
+  g_prefs.putUChar("scroll",   (uint8_t)g_scroll);
+  g_prefs.putUShort("speed",   g_speed);
+  g_prefs.putUChar("bright",   g_intensity);
+  g_prefs.putUChar("clkstyle", (uint8_t)g_clockStyle);
+  g_prefs.putUChar("clkfont",  (uint8_t)g_clockFont);
+  g_prefs.putUChar("flip",     g_flip ? 1 : 0);
+  g_prefs.putUChar("screen",   g_screen ? 1 : 0);
+  g_prefs.putULong("tmdur",    g_tmDuration);
+  g_prefs.putString("clkfmt",  g_clockFmt);
+  if (g_messageSet) g_prefs.putString("msg", g_message);
+  g_saveDirty = false;
+}
+
 void begin() {
   g_prefs.begin("display", false);
   uint8_t st = g_prefs.getUChar("clkstyle", (uint8_t)CLK_HM_BAR);
@@ -475,6 +535,23 @@ void begin() {
   g_clockFont = g_prefs.getUChar("clkfont", (uint8_t)CFONT_BIG) ? CFONT_BIG : CFONT_STOCK;
   g_flip      = g_prefs.getUChar("flip", 0) != 0;
   g_screen    = g_prefs.getUChar("screen", 1) != 0;
+
+  const uint8_t md = g_prefs.getUChar("mode", (uint8_t)MODE_TEXT);
+  if (md <= (uint8_t)MODE_TIMER) g_mode = (DispMode)md;
+  if (g_prefs.getUChar("font", 0) == (uint8_t)FONT_NARROW) g_textFont = FONT_NARROW;
+  const uint8_t ju = g_prefs.getUChar("just", (uint8_t)JUST_LEFT);
+  if (ju <= (uint8_t)JUST_RIGHT) g_just = (Justify)ju;
+  const uint8_t sc = g_prefs.getUChar("scroll", (uint8_t)SCROLL_AUTO);
+  if (sc <= (uint8_t)SCROLL_OFF) g_scroll = (ScrollPref)sc;
+  g_speed      = g_prefs.getUShort("speed", g_speed);
+  g_intensity  = g_prefs.getUChar("bright", g_intensity);
+  if (g_intensity > 15) g_intensity = 15;
+  g_clockFmt   = g_prefs.getString("clkfmt", g_clockFmt);
+  g_tmDuration = g_prefs.getULong("tmdur", g_tmDuration);
+  g_tmRemain   = g_tmDuration;
+
+  const String saved = g_prefs.getString("msg", "");
+  if (saved.length()) { g_message = saved; g_messageSet = true; }
 
   mx.begin();
   mx.control(MD_MAX72XX::INTENSITY, g_intensity);
@@ -487,6 +564,18 @@ void begin() {
 
 void tick() {
   const uint32_t now = millis();
+
+  // Latch the moment the countdown reaches zero, so DONE can blink briefly.
+  // Not gated on the current mode - a timer left running in the background
+  // should still finish.
+  if (g_tmRunning && timerRemainRaw() == 0) {
+    g_tmRunning = false;
+    g_tmRemain  = 0;
+    g_tmDoneAt  = now;
+    g_dirty     = true;
+  }
+
+  if (g_saveDirty && (int32_t)(now - g_saveAt) >= 0) saveSettings();
 
   // Re-evaluate content at 20 Hz - ample for hundredths on the stopwatch.
   if ((int32_t)(now - g_nextEval) >= 0) {
@@ -523,22 +612,23 @@ void tick() {
   }
 }
 
-void setMode(DispMode m) { g_mode = m; g_dirty = true; }
+void setMode(DispMode m) { g_mode = m; g_dirty = true; markSave(); }
 DispMode mode()          { return g_mode; }
 const char *modeName() {
   switch (g_mode) {
     case MODE_STOPWATCH: return "stopwatch";
+    case MODE_TIMER:     return "timer";
     case MODE_CLOCK:     return "clock";
     default:             return "text";
   }
 }
 
-void setMessage(const String &s) { g_message = s; g_messageSet = true; g_dirty = true; }
+void setMessage(const String &s) { g_message = s; g_messageSet = true; g_dirty = true; markSave(); }
 String message()                 { return g_message; }
 bool messageWasSet()             { return g_messageSet; }
 void setStatusMessage(const String &s) { g_status = s; g_dirty = true; }
 
-void setScroll(ScrollPref p) { g_scroll = p; g_dirty = true; }
+void setScroll(ScrollPref p) { g_scroll = p; g_dirty = true; markSave(); }
 ScrollPref scroll()          { return g_scroll; }
 const char *scrollName() {
   switch (g_scroll) {
@@ -549,13 +639,13 @@ const char *scrollName() {
 }
 bool scrollingNow() { return g_scrolling; }
 
-void setTextFont(TextFont f) { g_textFont = f; g_dirty = true; }
+void setTextFont(TextFont f) { g_textFont = f; g_dirty = true; markSave(); }
 TextFont textFont()          { return g_textFont; }
 const char *textFontName() {
   return g_textFont == FONT_NARROW ? "narrow" : "normal";
 }
 
-void setJustify(Justify j) { g_just = j; g_dirty = true; }
+void setJustify(Justify j) { g_just = j; g_dirty = true; markSave(); }
 Justify justify()          { return g_just; }
 const char *justifyName() {
   switch (g_just) {
@@ -565,11 +655,12 @@ const char *justifyName() {
   }
 }
 
-void setSpeed(uint16_t ms) { g_speed = ms; }
+void setSpeed(uint16_t ms) { g_speed = ms; markSave(); }
 uint16_t speed()           { return g_speed; }
 
 void setIntensity(uint8_t v) {
   g_intensity = v > 15 ? 15 : v;
+  markSave();
   mx.control(MD_MAX72XX::INTENSITY, g_intensity);
 }
 uint8_t intensity() { return g_intensity; }
@@ -578,21 +669,20 @@ void setClockFormat(const String &f) {
   g_clockFmt   = f;
   g_clockStyle = CLK_CUSTOM;          // an explicit format implies custom
   g_dirty      = true;
+  markSave();
 }
 String clockFormat() { return g_clockFmt; }
 
 void setClockFont(ClockFont f) {
   g_clockFont = f;
-  g_prefs.putUChar("clkfont", (uint8_t)f);
-  g_dirty = true;
+  g_dirty = true; markSave();
 }
 ClockFont clockFont() { return g_clockFont; }
 const char *clockFontName() { return g_clockFont == CFONT_BIG ? "big" : "stock"; }
 
 void setClockStyle(ClockStyle st) {
   g_clockStyle = st;
-  g_prefs.putUChar("clkstyle", (uint8_t)st);
-  g_dirty = true;
+  g_dirty = true; markSave();
 }
 ClockStyle clockStyle() { return g_clockStyle; }
 const char *clockStyleName() {
@@ -607,7 +697,7 @@ const char *clockStyleName() {
 
 void setScreen(bool on) {
   g_screen = on;
-  g_prefs.putUChar("screen", on ? 1 : 0);
+  markSave();
   mx.control(MD_MAX72XX::SHUTDOWN, on ? MD_MAX72XX::OFF : MD_MAX72XX::ON);
   g_dirty = true;             // repaint from scratch when it comes back
 }
@@ -615,8 +705,7 @@ bool screen() { return g_screen; }
 
 void setFlip(bool on) {
   g_flip  = on;
-  g_prefs.putUChar("flip", on ? 1 : 0);
-  g_dirty = true;
+  g_dirty = true; markSave();
 }
 bool flip() { return g_flip; }
 
@@ -639,6 +728,38 @@ uint16_t messageColumns() { return g_colCount; }
 static bool     g_swRunning = false;
 static uint32_t g_swAccum   = 0;
 static uint32_t g_swStart   = 0;
+
+// Countdown timer ------------------------------------------------------------
+void timerSet(uint32_t ms) {
+  g_tmDuration = ms;
+  g_tmRemain   = ms;
+  g_tmRunning  = false;
+  g_tmDoneAt   = 0;
+  g_dirty = true; markSave();
+}
+void timerStart() {
+  if (g_tmRunning || timerRemainRaw() == 0) return;
+  g_tmStart   = millis();
+  g_tmRunning = true;
+  g_dirty = true;
+}
+void timerStop() {
+  if (!g_tmRunning) return;
+  g_tmRemain  = timerRemainRaw();
+  g_tmRunning = false;
+  g_dirty = true;
+}
+void timerToggle() { g_tmRunning ? timerStop() : timerStart(); }
+void timerReset() {
+  g_tmRemain  = g_tmDuration;
+  g_tmRunning = false;
+  g_tmDoneAt  = 0;
+  g_dirty = true;
+}
+bool timerRunning()  { return g_tmRunning; }
+bool timerFinished() { return timerRemainRaw() == 0; }
+uint32_t timerRemainingMs() { return timerRemainRaw(); }
+uint32_t timerDurationMs()  { return g_tmDuration; }
 
 void swStart() { if (!g_swRunning) { g_swStart = millis(); g_swRunning = true; } }
 void swStop()  { if (g_swRunning) { g_swAccum += millis() - g_swStart; g_swRunning = false; } }

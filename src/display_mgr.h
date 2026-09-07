@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-enum DispMode : uint8_t { MODE_TEXT, MODE_STOPWATCH, MODE_CLOCK };
+enum DispMode : uint8_t { MODE_TEXT, MODE_STOPWATCH, MODE_CLOCK, MODE_TIMER };
 
 // AUTO = scroll only when the message is wider than the panel.
 // ON/OFF force it, and apply to MODE_TEXT only - stopwatch and clock always
@@ -84,6 +84,18 @@ const char *clockFontName();
 void        setClockStyle(ClockStyle s);  // persisted to NVS
 ClockStyle  clockStyle();
 const char *clockStyleName();
+
+// Countdown timer. Duration is set once; start/stop/reset behave like the
+// stopwatch, and the display shows DONE (blinking briefly) when it reaches zero.
+void     timerSet(uint32_t ms);
+void     timerStart();
+void     timerStop();
+void     timerToggle();
+void     timerReset();          // back to the full duration, stopped
+bool     timerRunning();
+bool     timerFinished();
+uint32_t timerRemainingMs();
+uint32_t timerDurationMs();
 
 void     swStart();
 void     swStop();

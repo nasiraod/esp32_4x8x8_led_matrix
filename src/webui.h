@@ -58,7 +58,17 @@ a{color:var(--acc);text-decoration:none}
 <div class="card"><h2>Mode</h2><div class="row" id="mode">
 <button data-m="text" onclick="cmd('mode text')">Text</button>
 <button data-m="stopwatch" onclick="cmd('mode stopwatch')">Stopwatch</button>
+<button data-m="timer" onclick="cmd('mode timer')">Timer</button>
 <button data-m="clock" onclick="cmd('mode clock')">Clock</button></div></div>
+
+<div class="card"><h2>Timer</h2>
+<div class="s" id="tmr">-</div>
+<input type="text" id="td" placeholder="5m, 90s, 1h30m or MM:SS" autocomplete="off"
+ onkeydown="if(event.key==='Enter')startTimer()" style="margin-top:8px">
+<div class="row" style="margin-top:10px">
+<button class="p" onclick="startTimer()">Start</button>
+<button onclick="cmd('timer toggle')">Pause</button>
+<button onclick="cmd('timer reset')">Reset</button></div></div>
 
 <div class="card"><h2>Clock style</h2>
 <div class="row" id="clock" style="margin-bottom:8px">
@@ -134,6 +144,11 @@ var $=function(i){return document.getElementById(i)};
 function cmd(c){return fetch('/api/cmd?c='+encodeURIComponent(c)).then(function(r){
  return r.text()}).then(function(t){refresh();return t})}
 function send(){var v=$('msg').value;if(v)cmd('text '+v)}
+function startTimer(){
+ var v=$('td').value.trim();
+ if(!v){$('tmr').textContent='enter a duration';return}
+ cmd('timer '+v);
+}
 function setSleep(){
  var a=$('s1').value,b=$('s2').value,d=$('sd').value.trim();
  if(!a||!b){$('slp').textContent='pick both times';return}
@@ -146,6 +161,7 @@ function refresh(){return fetch('/api/status').then(function(r){return r.json()}
   $('st').textContent=j.mode+' · '+j.wifi+' · '+j.ip;
   $('net').textContent='SSID '+j.ssid+' · '+j.ip+' · '+j.cols+' cols';
   $('slp').textContent='schedule: '+j.sleep;
+  $('tmr').textContent='timer: '+j.timer;
   seg('mode','data-m',j.mode);seg('clock','data-c',j.clock);seg('clock2','data-c',j.clock);seg('cfont','data-cf',j.clockfont);seg('align','data-a',j.align);seg('font','data-f',j.font);seg('flip','data-fl',j.flip);seg('screen','data-sc',j.screen);seg('scroll','data-s',j.scroll);
   if(document.activeElement!==$('br')){$('br').value=j.bright;$('bv').textContent=j.bright}
   if(document.activeElement!==$('sp')){$('sp').value=j.speed;$('spv').textContent=j.speed+'ms'}

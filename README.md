@@ -63,7 +63,7 @@ identically on all of them.
 
 ```
 text <msg>                      show a message (switches to text mode)
-mode text|stopwatch|clock
+mode text|stopwatch|timer|clock
 scroll on|off|auto              auto = scroll only when wider than 32 columns
 align left|center|right
 font normal|narrow              normal = 5x7 full ASCII; narrow = 3x8
@@ -76,6 +76,8 @@ flip on|off                     180-degree rotation for upside-down mounting
 mirror on|off                   panel wiring compensation (rarely needed)
 hw <0-7>                        MAX7219 module type, for orientation debugging
 sw start|stop|toggle|reset      stopwatch
+timer 5m|90s|1h30m|MM:SS        countdown; setting a duration starts it
+timer start|stop|toggle|reset
 clock hmbar|hmblink|ms|hms      clock layout
 clock custom <strftime>
 clock font stock|big            5x7 (leaves room for the bar) or 8-row digits
@@ -84,8 +86,14 @@ wifi status|set <ssid> [pass]|clear|portal
 status | help | reboot
 ```
 
-Settings marked persistent — clock style and font, flip, screen, timezone, WiFi
-credentials — are stored in NVS and survive a reboot.
+**Everything persists.** Mode, message, font, alignment, scrolling, speed,
+brightness, clock style and format, flip, screen state, timer duration, the
+sleep schedule, timezone and WiFi credentials are all stored in NVS and come
+back after a power cut.
+
+Writes are debounced by two seconds rather than applied per change — OTA
+progress alone calls `setMessage()` about a hundred times per update, and
+coalescing keeps that to a single flash write.
 
 ## Display modes
 
@@ -93,6 +101,10 @@ credentials — are stored in NVS and survive a reboot.
 
 **Stopwatch** — `SS.hh` under 100 s, then `M:SS`. Timing comes from `millis()`
 deltas, so display rate never affects accuracy.
+
+**Timer** — counts down and shows `DONE`, blinking for the first 30 s. `M:SS`
+above a minute, `SS.h` below it. It keeps running in the background if you
+switch modes, and finishes regardless.
 
 **Clock** — NTP over WiFi. 32 columns cannot hold six readable digits (5.3
 columns each including separators), so there are four layouts:

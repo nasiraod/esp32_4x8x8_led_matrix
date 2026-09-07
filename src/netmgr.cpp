@@ -177,7 +177,9 @@ static void handleApiStatus() {
   j += "\",\"scroll\":\""; j += Display::scrollName();
   j += "\",\"bright\":";  j += Display::intensity();
   j += ",\"speed\":";     j += Display::speed();
-  j += ",\"cols\":";      j += Display::messageColumns();
+  j += ",\"timer\":\"";   j += Display::timerRemainingMs() / 1000;
+  j += Display::timerRunning() ? " run" : (Display::timerFinished() ? " done" : " stop");
+  j += "\",\"cols\":";     j += Display::messageColumns();
   j += ",\"wifi\":\"";    j += stateName();
   j += "\",\"ip\":\"";    j += ip();
   j += "\",\"ssid\":\"";  j += (g_ssid.isEmpty() ? String("(none)") : g_ssid);

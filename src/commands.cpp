@@ -19,6 +19,51 @@ static void split(const String &in, String &verb, String &rest) {
   verb.toLowerCase();   // keywords only - never use this where case matters
 }
 
+// "90" = seconds, and "5m" / "1h30m" / "2m30s" / "MM:SS" all work.
+// Returns milliseconds, or 0 if it cannot be parsed.
+static uint32_t parseDuration(const String &in) {
+  String v = in; v.trim(); v.toLowerCase();
+  if (v.isEmpty()) return 0;
+
+  if (v.indexOf(':') > 0) {                    // MM:SS
+    const int c = v.indexOf(':');
+    const long m = v.substring(0, c).toInt();
+    const long sec = v.substring(c + 1).toInt();
+    if (m < 0 || sec < 0 || sec > 59) return 0;
+    return (uint32_t)((m * 60 + sec) * 1000L);
+  }
+
+  bool sawUnit = false;
+  uint32_t total = 0;
+  long num = 0;
+  bool sawDigit = false;
+  for (size_t i = 0; i < v.length(); i++) {
+    const char c = v[i];
+    if (c >= '0' && c <= '9') { num = num * 10 + (c - '0'); sawDigit = true; continue; }
+    long mult = 0;
+    if      (c == 'h') mult = 3600;
+    else if (c == 'm') mult = 60;
+    else if (c == 's') mult = 1;
+    else return 0;                             // unexpected character
+    if (!sawDigit) return 0;
+    total += (uint32_t)(num * mult * 1000L);
+    num = 0; sawDigit = false; sawUnit = true;
+  }
+  if (sawDigit) total += (uint32_t)(num * (sawUnit ? 1L : 1L) * 1000L);  // trailing = seconds
+  return total;
+}
+
+static String fmtDuration(uint32_t ms) {
+  const uint32_t sec = ms / 1000;
+  char b[24];
+  if (sec >= 3600) snprintf(b, sizeof(b), "%luh%02lum",
+                            (unsigned long)(sec / 3600), (unsigned long)((sec % 3600) / 60));
+  else if (sec >= 60) snprintf(b, sizeof(b), "%lum%02lus",
+                               (unsigned long)(sec / 60), (unsigned long)(sec % 60));
+  else snprintf(b, sizeof(b), "%lus", (unsigned long)sec);
+  return String(b);
+}
+
 static String statusLine() {
   String s;
   s += "mode=";    s += Display::modeName();
@@ -37,6 +82,8 @@ static String statusLine() {
   s += " sleep=";  s += Sleep::describe();
   s += " flip=";   s += Display::flip() ? "on" : "off";
   s += " mirror="; s += Display::mirror() ? "on" : "off";
+  s += " timer=";   s += fmtDuration(Display::timerRemainingMs());
+  s += Display::timerRunning() ? "/run" : "/stop";
   s += " sw=";      s += Display::swRunning() ? "run" : "stop";
   s += "/";         s += Display::swElapsedMs();
   s += "ms wifi=";  s += Net::stateName();
@@ -48,12 +95,13 @@ static String statusLine() {
 static String helpText() {
   return F(
     "commands: "
-    "text <msg> | mode text|stopwatch|clock | "
+    "text <msg> | mode text|stopwatch|timer|clock | "
     "scroll on|off|auto | align left|center|right | font normal|narrow | "
     "speed <ms> | bright <0-15> | "
     "screen on|off|toggle | sleep HH:MM HH:MM [dim]|off | "
     "flip on|off | mirror on|off | hw <0-7> | "
-    "sw start|stop|toggle|reset | clock hmbar|hmblink|ms|hms|custom|font stock|big | "
+    "sw start|stop|toggle|reset | timer <5m|90s|MM:SS>|start|stop|reset | "
+    "clock hmbar|hmblink|ms|hms|custom|font stock|big | "
     "tz <posix> | "
     "wifi status|set <ssid> [pass]|clear|portal | status | reboot");
 }
@@ -81,7 +129,8 @@ String handle(const String &raw) {
     if      (m == "text")      Display::setMode(MODE_TEXT);
     else if (m == "stopwatch" || m == "sw") Display::setMode(MODE_STOPWATCH);
     else if (m == "clock" || m == "time" || m == "date") Display::setMode(MODE_CLOCK);
-    else return "ERR mode text|stopwatch|clock";
+    else if (m == "timer") Display::setMode(MODE_TIMER);
+    else return "ERR mode text|stopwatch|timer|clock";
     return String("OK mode ") + Display::modeName();
   }
 
@@ -189,6 +238,30 @@ String handle(const String &raw) {
     if (v < 0 || v > 15) return "ERR bright 0-15";
     Display::setIntensity((uint8_t)v);
     return String("OK bright ") + Display::intensity();
+  }
+
+  // Countdown timer.
+  if (verb == "timer") {
+    String v = rest; v.toLowerCase();
+    if (v.isEmpty() || v == "status")
+      return String("timer ") + fmtDuration(Display::timerDurationMs()) +
+             " remaining=" + fmtDuration(Display::timerRemainingMs()) +
+             (Display::timerRunning() ? " running" :
+              (Display::timerFinished() ? " done" : " stopped"));
+
+    if      (v == "start")  Display::timerStart();
+    else if (v == "stop")   Display::timerStop();
+    else if (v == "toggle") Display::timerToggle();
+    else if (v == "reset")  Display::timerReset();
+    else {
+      const uint32_t ms = parseDuration(rest);
+      if (ms == 0) return "ERR timer <5m|90s|1h30m|MM:SS> | start|stop|toggle|reset";
+      Display::timerSet(ms);
+      Display::timerStart();                   // setting a duration starts it
+    }
+    Display::setMode(MODE_TIMER);
+    return String("OK timer ") + fmtDuration(Display::timerRemainingMs()) +
+           (Display::timerRunning() ? " running" : " stopped");
   }
 
   if (verb == "sw") {
