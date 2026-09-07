@@ -3,6 +3,8 @@
 #include "display_mgr.h"
 #include "netmgr.h"
 #include "sleepsched.h"
+#include "icons.h"
+#include "buildinfo.h"
 
 namespace Cmd {
 
@@ -89,6 +91,7 @@ static String statusLine() {
   s += "ms wifi=";  s += Net::stateName();
   s += " ip=";      s += Net::ip();
   s += " ssid=";    s += Net::ssid().isEmpty() ? String("(none)") : Net::ssid();
+  s += " build=";   s += buildId();
   return s;
 }
 
@@ -103,7 +106,7 @@ static String helpText() {
     "sw start|stop|toggle|reset | timer <5m|90s|MM:SS>|start|stop|reset | "
     "clock hmbar|hmblink|ms|hms|custom|font stock|big | "
     "tz <posix> | "
-    "wifi status|set <ssid> [pass]|clear|portal | status | reboot");
+    "wifi status|set <ssid> [pass]|clear|portal | icons | build | status | reboot");
 }
 
 String handle(const String &raw) {
@@ -115,6 +118,19 @@ String handle(const String &raw) {
   split(line, verb, rest);
 
   if (verb == "help" || verb == "?") return helpText();
+  if (verb == "build" || verb == "version") return String("build ") + buildId();
+
+  // Icons are written inline in message text, e.g. `text {bell} Laundry done`.
+  if (verb == "icons") {
+    String s2 = "icons: ";
+    for (size_t i = 0; i < ICON_COUNT; i++) {
+      if (i) s2 += " ";
+      s2 += ICON_TABLE[i].name;
+      if (ICON_TABLE[i].frames > 1) s2 += "*";
+    }
+    s2 += "  |  {name} still, {name*} animated";
+    return s2;
+  }
   if (verb == "status")              return statusLine();
 
   if (verb == "text") {

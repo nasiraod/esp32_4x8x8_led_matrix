@@ -1,5 +1,42 @@
 Import("env")
 
+import datetime, subprocess, os, io
+
+# ---------------------------------------------------------------------------
+# Build identity, regenerated on every build into src/build_id.h (gitignored).
+#
+# A bare __DATE__/__TIME__ is not enough: those only change when the file
+# holding them is recompiled, so a stale stamp can claim a build that never
+# happened. Writing the header each build means the one file that includes it
+# always rebuilds, and the value always moves.
+#
+# Format: "2026-09-05 05:10:33 g0362090+"   ('+' = uncommitted changes)
+# ---------------------------------------------------------------------------
+def _git(args, default):
+    try:
+        return subprocess.check_output(["git"] + args, stderr=subprocess.DEVNULL,
+                                       cwd=env.subst("$PROJECT_DIR")).decode().strip()
+    except Exception:
+        return default
+
+_rev = _git(["rev-parse", "--short", "HEAD"], "nogit")
+_dirty = "+" if _git(["status", "--porcelain"], "") else ""
+_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+_bid = '%s g%s%s' % (_stamp, _rev, _dirty)
+
+_path = os.path.join(env.subst("$PROJECT_DIR"), "src", "build_id.h")
+_nl = chr(10)
+_text = ("// Generated on every build by scripts/extra_targets.py - do not edit." + _nl +
+         "#pragma once" + _nl +
+         ('#define BUILD_ID "%s"' % _bid) + _nl)
+_old = ""
+if os.path.exists(_path):
+    _old = io.open(_path, encoding="utf-8").read()
+if _old != _text:
+    io.open(_path, "w", encoding="utf-8", newline=_nl).write(_text)
+print("build id: %s" % _bid)
+
+
 # ---------------------------------------------------------------------------
 # `pio run -t erasenvs`  - wipe ONLY the NVS partition.
 #

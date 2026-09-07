@@ -7,6 +7,7 @@
 #include <Update.h>
 #include "otamgr.h"
 #include "sleepsched.h"
+#include "buildinfo.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -183,6 +184,7 @@ static void handleApiStatus() {
   j += ",\"wifi\":\"";    j += stateName();
   j += "\",\"ip\":\"";    j += ip();
   j += "\",\"ssid\":\"";  j += (g_ssid.isEmpty() ? String("(none)") : g_ssid);
+  j += "\",\"build\":\"";  j += buildId();
   j += "\"}";
   server.send(200, "application/json", j);
 }

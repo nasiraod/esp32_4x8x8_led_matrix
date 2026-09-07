@@ -8,3 +8,6 @@
 
 # Windows crash dumps
 *.stackdump
+
+# Regenerated on every build
+src/build_id.h

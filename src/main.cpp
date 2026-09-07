@@ -8,6 +8,7 @@
 #include "commands.h"
 #include "otamgr.h"
 #include "sleepsched.h"
+#include "buildinfo.h"
 
 // ---------------------------------------------------------------------------
 // 4x MAX7219 panel on an ESP32, controlled over TCP and USB serial.
@@ -87,6 +88,7 @@ void setup() {
   delay(200);
   Serial.println();
   Serial.println(F("LEDPanel starting (WiFi + serial, no BLE)"));
+  Serial.print(F("[build] ")); Serial.println(buildId());
 
   Serial.printf("[clk] boot xtal=%uMHz cpu=%uMHz apb=%u\n",
                 (unsigned)getXtalFrequencyMhz(), (unsigned)getCpuFrequencyMhz(),

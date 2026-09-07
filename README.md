@@ -83,6 +83,8 @@ clock custom <strftime>
 clock font stock|big            5x7 (leaves room for the bar) or 8-row digits
 tz <posix>                      e.g. PST8PDT,M3.2.0,M11.1.0
 wifi status|set <ssid> [pass]|clear|portal
+icons                           list the icon names
+build                           firmware timestamp + git revision
 status | help | reboot
 ```
 
@@ -118,6 +120,34 @@ columns each including separators), so there are four layouts:
 
 `clock font big` gives 8-row digits. It is mutually exclusive with `hmbar`'s
 seconds bar, which needs row 7 — choosing one gives up the other.
+
+## Icons
+
+Written inline in message text, 8x8, using all 8 rows:
+
+```
+text {bell} Laundry done      still - a single representative frame
+text {bell*} Laundry done     animated
+icons                         list them
+```
+
+| | |
+|---|---|
+| Status | `wifi` `bell` `heart` `hourglass` `warn` `check` |
+| Notification | `mail` `home` `phone` `alarm` |
+| Weather | `sun` `cloud` `rain` `snow` `moon` |
+| Ambient | `smile` `note` `star` |
+
+All 18 animate: the mail flap opens, the phone shakes, rain and snow fall, the
+star sparkles. Frames advance every 200 ms, and an animated icon inside a
+scrolling message rebuilds **in place** - resetting the scroll offset on each
+frame would leave a long message permanently off-screen.
+
+At 8 columns an icon is a quarter of the panel, so they read best as a prefix to
+short text. `{name}` is reserved syntax; an unknown name renders literally.
+
+The art was designed as ASCII, rendered and reviewed, and only then generated
+into `src/icons.h` - worth repeating for any future glyph work.
 
 ## Fonts
 
@@ -187,6 +217,21 @@ This only helps for an image that boots and *then* dies. Firmware that hangs
 before `setup()` never reaches the rollback code, so **serial remains the
 recovery path** — which is why `esp32dev` is still the default environment.
 
+## Build identity
+
+Every build regenerates `src/build_id.h` (gitignored) via
+`scripts/extra_targets.py`:
+
+```
+build 2026-09-07 05:12:24 g956e2d1+      ('+' = uncommitted changes)
+```
+
+Reported at boot, by `build`, in `status`, and in the JSON API. Since updates go
+over the air, "did that upload actually land?" comes up constantly - this makes
+it checkable rather than a guess. A bare `__DATE__`/`__TIME__` would not do:
+those only change when the file holding them is recompiled, so a stale stamp can
+claim a build that never happened.
+
 ## Notes and limitations
 
 **No BLE.** Removed deliberately. On this board the Bluetooth controller hangs
@@ -222,6 +267,8 @@ src/
   netmgr.*              WiFi state machine, AP portal, web routes, JSON API
   tcpsrv.*              TCP/telnet control incl. IAC negotiation
   commands.*            the shared command parser
+  icons.h               generated 8x8 icon frames
+  buildinfo.*           build identity accessor
   otamgr.*              OTA updates, progress display, rollback
   sleepsched.*          scheduled screen off/dim
   webui.h              mobile control page (PROGMEM)

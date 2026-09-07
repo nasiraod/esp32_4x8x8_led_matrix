@@ -1,6 +1,7 @@
 #include "display_mgr.h"
 #include "config.h"
 #include <MD_MAX72xx.h>
+#include "icons.h"
 #include <SPI.h>
 #include <time.h>
 #include <Preferences.h>
@@ -88,6 +89,39 @@ static uint32_t g_saveAt     = 0;
 #define SAVE_DELAY_MS 2000UL
 
 static void markSave() { g_saveDirty = true; g_saveAt = millis() + SAVE_DELAY_MS; }
+
+// True while the rendered content contains a multi-frame icon, so tick() knows
+// to keep redrawing it.
+static bool     g_hasAnim   = false;
+static uint32_t g_nextFrame = 0;
+
+// If text[i] starts a "{name}" or "{name*}" token naming a known icon, return
+// the columns to draw and set tokLen to the token length. Otherwise nullptr.
+//
+// The bare name is STILL - a single representative frame. A trailing '*' opts
+// into the animation, matching how the `icons` command marks animated ones.
+static const uint8_t *iconAt(const String &t, size_t i, size_t &tokLen, bool &animated) {
+  if (t[i] != '{') return nullptr;
+  const int close = t.indexOf('}', i + 1);
+  if (close < 0 || close - (int)i > 16) return nullptr;
+
+  String name = t.substring(i + 1, close);
+  bool wantAnim = false;
+  if (name.endsWith("*")) { wantAnim = true; name.remove(name.length() - 1); }
+
+  for (size_t k = 0; k < ICON_COUNT; k++) {
+    if (name != ICON_TABLE[k].name) continue;
+    const IconDef &d = ICON_TABLE[k];
+    const bool moving = wantAnim && d.frames > 1;
+    const uint8_t frame = moving
+        ? (uint8_t)((millis() / ICON_FRAME_MS) % d.frames)
+        : d.still;
+    tokLen   = (size_t)(close - (int)i + 1);
+    animated = moving;
+    return d.data[frame];
+  }
+  return nullptr;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -327,7 +361,7 @@ static bool narrowRenderable(const String &s) {
   if (s.isEmpty()) return false;
   for (size_t i = 0; i < s.length(); i++) {
     const char c = s[i];
-    if (c == ' ' || narrowGlyph(c)) continue;
+    if (c == ' ' || c == '{' || c == '}' || c == '*' || narrowGlyph(c)) continue;
     return false;                            // fall back to the stock font
   }
   return true;
@@ -335,12 +369,21 @@ static bool narrowRenderable(const String &s) {
 
 static bool buildNarrowText(const String &s) {
   if (!narrowRenderable(s)) return false;
-  if ((uint16_t)(s.length() * 4) > MAX_MSG_COLS) return false;
+  if ((uint16_t)(s.length() * 9) > MAX_MSG_COLS) return false;   // icons are 8 wide
 
   g_colCount = 0;
+  g_hasAnim  = false;
   for (size_t i = 0; i < s.length(); i++) {
+    size_t tok = 0; bool anim = false;
+    const uint8_t *ic = iconAt(s, i, tok, anim);
+    if (ic) {                                   // icons stay 8 wide in any font
+      for (uint8_t k = 0; k < 8; k++) g_cols[g_colCount++] = ic[k];
+      if (anim) g_hasAnim = true;
+      i += tok - 1;
+      if (i + 1 < s.length()) g_cols[g_colCount++] = 0;
+      continue;
+    }
     const char c = s[i];
-
     const uint8_t *g = narrowGlyph(c);
 
     if (g) { for (uint8_t k = 0; k < 3; k++) g_cols[g_colCount++] = g[k]; }
@@ -431,9 +474,19 @@ static void build(const String &s) {
   }
 
   g_colCount = 0;
+  g_hasAnim  = false;
   uint8_t cbuf[16];
 
-  for (size_t i = 0; i < s.length() && g_colCount < MAX_MSG_COLS; i++) {
+  for (size_t i = 0; i < s.length() && g_colCount + 9 < MAX_MSG_COLS; i++) {
+    size_t tok = 0; bool anim = false;
+    const uint8_t *ic = iconAt(s, i, tok, anim);
+    if (ic) {                                   // "{name}" -> 8-column icon
+      for (uint8_t c = 0; c < 8; c++) g_cols[g_colCount++] = ic[c];
+      g_cols[g_colCount++] = 0x00;              // gap after the icon
+      if (anim) g_hasAnim = true;
+      i += tok - 1;
+      continue;
+    }
     const uint8_t n = mx.getChar((uint8_t)s[i], sizeof(cbuf), cbuf);
     for (uint8_t c = 0; c < n && g_colCount < MAX_MSG_COLS; c++)
       g_cols[g_colCount++] = cbuf[c];
@@ -589,6 +642,18 @@ void tick() {
       g_nextStep  = now;
       blit(g_offset);
     }
+  }
+
+  // Animated icons: rebuild so the next frame is rasterised, but KEEP the scroll
+  // offset. Rebuilding through the normal path would reset it to off-screen
+  // every 200ms and a scrolling message would never appear - the same trap that
+  // made the OTA progress label invisible.
+  if (g_hasAnim && (int32_t)(now - g_nextFrame) >= 0) {
+    g_nextFrame = now + ICON_FRAME_MS;
+    const int32_t keep = g_offset;
+    build(currentText());
+    g_offset = keep;
+    blit(g_offset);
   }
 
   // The seconds bar advances continuously while the HH:MM string changes only
