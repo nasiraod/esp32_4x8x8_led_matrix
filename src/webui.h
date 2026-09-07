@@ -27,6 +27,7 @@ h1{font-size:1.15rem;margin:2px 0}
 padding:14px;margin-bottom:12px}
 .card h2{font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;
 color:var(--mut);margin:0 0 10px}
+input[type=time]{width:100%;padding:11px;border-radius:11px;border:1px solid var(--line);background:#0c0e12;color:var(--fg);font-size:1rem;box-sizing:border-box}
 input[type=text]{width:100%;padding:13px;border-radius:11px;border:1px solid var(--line);
 background:#0c0e12;color:var(--fg);font-size:1rem}
 small{font-size:.7rem;opacity:.75;font-weight:400}
@@ -109,20 +110,58 @@ a{color:var(--acc);text-decoration:none}
 <div class="card"><h2>Network</h2><div class="s" id="net">-</div>
 <a href="/wifi">Wi-Fi settings &rarr;</a></div>
 
+<div class="card"><h2>Sleep schedule</h2>
+<div class="s" id="slp">-</div>
+<div class="row" style="margin-top:8px">
+<div><div class="lbl" style="margin:0 0 4px"><span>Off at</span></div>
+<input type="time" id="s1" value="23:00"></div>
+<div><div class="lbl" style="margin:0 0 4px"><span>On at</span></div>
+<input type="time" id="s2" value="07:00"></div>
+</div>
+<div class="lbl"><span>Dim to (blank = screen off)</span></div>
+<input type="text" id="sd" placeholder="e.g. 1" inputmode="numeric" autocomplete="off">
+<div class="row" style="margin-top:10px">
+<button class="p" onclick="setSleep()">Set</button>
+<button onclick="cmd('sleep off')">Disable</button></div></div>
+
+<div class="card"><h2>Firmware</h2>
+<input type="file" id="fw" accept=".bin" style="width:100%;color:var(--mut);font-size:.85rem">
+<div class="row" style="margin-top:10px"><button onclick="upload()">Upload &amp; reboot</button></div>
+<div class="s" id="fws" style="margin-top:8px">pick firmware.bin from .pio/build/esp32dev/</div></div>
+
 <script>
 var $=function(i){return document.getElementById(i)};
 function cmd(c){return fetch('/api/cmd?c='+encodeURIComponent(c)).then(function(r){
  return r.text()}).then(function(t){refresh();return t})}
 function send(){var v=$('msg').value;if(v)cmd('text '+v)}
+function setSleep(){
+ var a=$('s1').value,b=$('s2').value,d=$('sd').value.trim();
+ if(!a||!b){$('slp').textContent='pick both times';return}
+ cmd('sleep '+a+' '+b+(d?' '+d:''));
+}
 function seg(box,attr,val){var k=$(box).children;
  for(var i=0;i<k.length;i++)k[i].classList.toggle('on',k[i].getAttribute(attr)===val)}
 function refresh(){return fetch('/api/status').then(function(r){return r.json()})
  .then(function(j){
   $('st').textContent=j.mode+' · '+j.wifi+' · '+j.ip;
   $('net').textContent='SSID '+j.ssid+' · '+j.ip+' · '+j.cols+' cols';
+  $('slp').textContent='schedule: '+j.sleep;
   seg('mode','data-m',j.mode);seg('clock','data-c',j.clock);seg('clock2','data-c',j.clock);seg('cfont','data-cf',j.clockfont);seg('align','data-a',j.align);seg('font','data-f',j.font);seg('flip','data-fl',j.flip);seg('screen','data-sc',j.screen);seg('scroll','data-s',j.scroll);
   if(document.activeElement!==$('br')){$('br').value=j.bright;$('bv').textContent=j.bright}
   if(document.activeElement!==$('sp')){$('sp').value=j.speed;$('spv').textContent=j.speed+'ms'}
  }).catch(function(){$('st').textContent='offline'})}
+function upload(){
+ var f=$('fw').files[0];
+ if(!f){$('fws').textContent='choose a .bin first';return}
+ var fd=new FormData();fd.append('firmware',f);
+ var x=new XMLHttpRequest();
+ x.upload.onprogress=function(e){if(e.lengthComputable)
+   $('fws').textContent='uploading '+Math.round(e.loaded/e.total*100)+'%'};
+ x.onload=function(){$('fws').textContent=x.status===200
+   ?'done - rebooting, reload in ~15s':'failed: '+x.responseText};
+ x.onerror=function(){$('fws').textContent='upload error'};
+ x.open('POST','/update');x.send(fd);
+ $('fws').textContent='uploading...';
+}
 refresh();setInterval(refresh,2000);
 </script></body></html>)HTML";

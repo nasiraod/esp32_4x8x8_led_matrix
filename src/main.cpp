@@ -6,6 +6,8 @@
 #include "netmgr.h"
 #include "tcpsrv.h"
 #include "commands.h"
+#include "otamgr.h"
+#include "sleepsched.h"
 
 // ---------------------------------------------------------------------------
 // 4x MAX7219 panel on an ESP32, controlled over TCP and USB serial.
@@ -45,7 +47,9 @@ static const char *stageName(uint32_t s) {
     case 1:  return "Net::tick";
     case 2:  return "Tcp::tick";
     case 3:  return "Display::tick";
-    case 4:  return "serial-read";
+    case 4:  return "Ota::tick";
+    case 5:  return "Sleep::tick";
+    case 6:  return "serial-read";
     default: return "(none)";
   }
 }
@@ -119,6 +123,8 @@ void setup() {
 
   Net::begin();     // decides AP portal vs STA from saved credentials
   Tcp::begin();
+  Ota::begin();     // rollback check; ArduinoOTA starts once WiFi is up
+  Sleep::begin();   // load the saved off/dim schedule
 
   Serial.printf("TCP port %d. Type 'help'.\n", TCP_PORT);
 }
@@ -150,7 +156,9 @@ void loop() {
   stage(1); Net::tick();
   stage(2); Tcp::tick();
   stage(3); Display::tick();
-  stage(4);
+  stage(4); Ota::tick();
+  stage(5); Sleep::tick();
+  stage(6);
 
   while (Serial.available()) {
     const char c = (char)Serial.read();

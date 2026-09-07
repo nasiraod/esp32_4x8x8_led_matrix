@@ -243,7 +243,7 @@ static const uint8_t LOWER3[26 * 3] = {
 // unsupported character makes the WHOLE message fall back to the stock font,
 // which is 7 rows and so leaves the bottom row blank - a jarring change for
 // something as ordinary as a "!".
-static const char PUNCT_CHARS[] = ":.-!?,'\"()/\+=*#@;_<>%&";
+static const char PUNCT_CHARS[] = ":.-!?,'\"()/\\+=*#@;_<>%&";
 static const uint8_t PUNCT3[][3] = {
   {0x00,0x24,0x00},   // :
   {0x00,0x80,0x00},   // .
@@ -266,7 +266,7 @@ static const uint8_t PUNCT3[][3] = {
   {0x80,0x80,0x80},   // _
   {0x18,0x24,0x42},   // <
   {0x42,0x24,0x18},   // >
-  {0xC3,0x3C,0xC3},   // %
+  {0x23,0xDB,0xC4},   // %
   {0x76,0x89,0x60},   // &
 };
 

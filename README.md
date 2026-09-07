@@ -25,11 +25,15 @@ from its own supply rather than the ESP32's regulator.
 ## Build and flash
 
 ```bash
-pio run                 # build
-pio run -t upload       # flash over USB
-pio run -t erasenvs     # wipe saved WiFi credentials and settings
-pio run -t eraseall     # full chip erase (needs a re-upload after)
+pio run                        # build
+pio run -e esp32ota -t upload  # flash over WiFi (normal route)
+pio run -t upload              # flash over USB (recovery route)
+pio run -t erasenvs            # wipe saved WiFi credentials and settings
+pio run -t eraseall            # full chip erase (needs a re-upload after)
 ```
+
+**Updates normally go over the air** and need no cable, no buttons. The serial
+route below is for recovery, or for changing the partition table.
 
 **This board has no auto-reset circuit.** Before every upload:
 
@@ -66,6 +70,8 @@ font normal|narrow              normal = 5x7 full ASCII; narrow = 3x8
 speed <ms>                      scroll step, 5-1000
 bright <0-15>
 screen on|off|toggle            MAX7219 shutdown - genuinely dark
+sleep HH:MM HH:MM [dim]         blank (or dim to 0-15) between two times
+sleep off                       disable the schedule
 flip on|off                     180-degree rotation for upside-down mounting
 mirror on|off                   panel wiring compensation (rarely needed)
 hw <0-7>                        MAX7219 module type, for orientation debugging
@@ -140,6 +146,35 @@ scrolling text — under scrolling, "mirrored" and "upside down" are
 indistinguishable. `hw 0-7` and `mirror on|off` retune it live, without a
 reflash.
 
+## Firmware updates (OTA)
+
+Three ways, all landing in `otamgr.cpp`:
+
+```bash
+pio run -e esp32ota -t upload    # or: pio run -t ota
+curl -u admin:<OTA_PASSWORD> -F "firmware=@.pio/build/esp32dev/firmware.bin"      http://ledpanel.local/update
+```
+
+or the **Firmware** card in the web UI — pick `firmware.bin` from your phone.
+
+Credentials are in `src/config.h` (`OTA_HOSTNAME`, `OTA_PASSWORD`,
+`OTA_TRUST_MS`); the same password guards ArduinoOTA and the HTTP form. **Change
+it from the default** before putting this on a network you do not control.
+
+Progress shows on the panel as `OTA nn%` in the narrow font, and the task
+watchdog is fed during flash writes — without that, a large upload starves
+`loop()` and the 10 s watchdog aborts it mid-write.
+
+**Rollback** is trust-on-survival: a marker goes into NVS before rebooting into a
+new image and clears after 30 s. If the next boot finds the marker set *and* the
+reset reason indicates a crash, it switches back to the previous slot. The reset
+reason is checked deliberately, so power-cycling soon after a good update does
+not trigger a spurious rollback.
+
+This only helps for an image that boots and *then* dies. Firmware that hangs
+before `setup()` never reaches the rollback code, so **serial remains the
+recovery path** — which is why `esp32dev` is still the default environment.
+
 ## Notes and limitations
 
 **No BLE.** Removed deliberately. On this board the Bluetooth controller hangs
@@ -149,9 +184,11 @@ by testing WiFi-only, BLE-only, and both: BLE alone fails, so it is not a
 coexistence problem. Retry on different hardware before spending time in
 firmware.
 
-**No OTA yet.** `huge_app.csv` has a single 3 MB app slot and no OTA partitions.
-Firmware is ~1.05 MB, so `min_spiffs.csv` (two 1.875 MB slots) would fit
-comfortably — but switching needs one serial flash and wipes NVS.
+**Partitions are `min_spiffs.csv`** — two 1.875 MB app slots so OTA can write to
+the inactive one. Firmware is ~1.05 MB, about 56% of a slot. Note that `nvs`
+sits at `0x9000` in both this and `huge_app.csv`, so the switch preserved saved
+settings; check the offsets before assuming a partition change costs
+re-provisioning.
 
 **No authentication** on the web UI or TCP port. Fine on a trusted LAN; do not
 expose it.
@@ -173,5 +210,7 @@ src/
   netmgr.*              WiFi state machine, AP portal, web routes, JSON API
   tcpsrv.*              TCP/telnet control incl. IAC negotiation
   commands.*            the shared command parser
+  otamgr.*              OTA updates, progress display, rollback
+  sleepsched.*          scheduled screen off/dim
   webui.h              mobile control page (PROGMEM)
 ```

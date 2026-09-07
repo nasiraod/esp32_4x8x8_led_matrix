@@ -34,3 +34,17 @@ env.AddCustomTarget(
     title="Erase entire flash",
     description="Full erase - requires a re-upload afterwards",
 )
+
+# `pio run -t ota` - build, then push over WiFi. No cable, no BOOT/EN sequence.
+# Requires the running firmware to be on the network; falls back to a serial
+# `pio run -t upload` if the device is unreachable.
+env.AddCustomTarget(
+    name="ota",
+    dependencies="$BUILD_DIR/${PROGNAME}.bin",
+    actions=[
+        '"$PYTHONEXE" "$PROJECT_PACKAGES_DIR/framework-arduinoespressif32/tools/espota.py" '
+        '-i ledpanel.local -a ledpanel-ota -f "$BUILD_DIR/${PROGNAME}.bin" -r'
+    ],
+    title="OTA upload",
+    description="Build and push firmware over WiFi",
+)

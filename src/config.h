@@ -33,6 +33,17 @@
 
 #define NVS_NAMESPACE           "ledpanel"
 
+// Over-the-air updates. Used for BOTH the ArduinoOTA push (pio run -t ota) and
+// HTTP basic auth on the web /update form - keep them in step, and change this
+// from the default before putting the panel on a network you do not control.
+#define OTA_HOSTNAME            "ledpanel"
+#define OTA_PASSWORD            "ledpanel-ota"
+
+// How long a freshly-flashed image must run before it is trusted. Until then a
+// marker sits in NVS; if the next boot still finds it, the image never got this
+// far and we roll back to the previous slot.
+#define OTA_TRUST_MS            30000UL
+
 
 // Default POSIX timezone: Eastern (Toronto). Change at runtime with `tz <spec>`.
 #define DEFAULT_TZ              "EST5EDT,M3.2.0,M11.1.0"

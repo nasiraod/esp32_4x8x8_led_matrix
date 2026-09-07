@@ -4,6 +4,9 @@
 #include "commands.h"
 #include "webui.h"
 #include <ESPmDNS.h>
+#include <Update.h>
+#include "otamgr.h"
+#include "sleepsched.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -183,6 +186,50 @@ static void handleApiStatus() {
 }
 
 // Open the listening socket. Safe only after WiFi.mode() has been called.
+// Firmware upload ----------------------------------------------------------
+//
+// Two callbacks: the second receives the file in chunks, the first runs once
+// the whole body has arrived. Guarded by HTTP basic auth - without it anyone on
+// the network could reflash the panel.
+
+static bool otaAuthed() {
+  if (server.authenticate("admin", OTA_PASSWORD)) return true;
+  server.requestAuthentication();
+  return false;
+}
+
+static void handleUpdateDone() {
+  if (!otaAuthed()) return;
+  const bool ok = !Update.hasError();
+  server.sendHeader("Connection", "close");
+  server.send(ok ? 200 : 500, "text/plain",
+              ok ? "OK - rebooting into the new firmware" : "FAILED - old firmware kept");
+  delay(300);
+  if (ok) ESP.restart();
+}
+
+static void handleUpdateUpload() {
+  HTTPUpload &up = server.upload();
+
+  if (up.status == UPLOAD_FILE_START) {
+    if (!server.authenticate("admin", OTA_PASSWORD)) return;   // ignore body
+    Ota::uploadBegin();
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN))
+      Serial.printf("[ota] begin failed: %s\n", Update.errorString());
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(up.buf, up.currentSize) != up.currentSize)
+      Serial.printf("[ota] write failed: %s\n", Update.errorString());
+    Ota::uploadProgress(up.totalSize, 0);        // total unknown until the end
+  } else if (up.status == UPLOAD_FILE_END) {
+    const bool ok = Update.end(true);
+    if (!ok) Serial.printf("[ota] end failed: %s\n", Update.errorString());
+    Ota::uploadEnd(ok);
+  } else if (up.status == UPLOAD_FILE_ABORTED) {
+    Update.abort();
+    Ota::uploadEnd(false);
+  }
+}
+
 static void ensureServer() {
   if (!g_serverUp) { server.begin(); g_serverUp = true; }
 }
@@ -196,6 +243,7 @@ static void ensureRoutes() {
   server.on("/status", HTTP_GET, handleStatus);
   server.on("/api/cmd", HTTP_GET, handleApiCmd);
   server.on("/api/status", HTTP_GET, handleApiStatus);
+  server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound([]() {
     // Redirect unknown paths only while the portal is up - that is what makes a
     // phone's connectivity probe open the setup page. Once connected, a wrong

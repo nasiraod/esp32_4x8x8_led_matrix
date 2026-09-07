@@ -2,6 +2,7 @@
 #include "config.h"
 #include "display_mgr.h"
 #include "netmgr.h"
+#include "sleepsched.h"
 
 namespace Cmd {
 
@@ -33,6 +34,7 @@ static String statusLine() {
   s += "/";       s += Display::clockFontName();
   s += " hw=";     s += Display::hwType();
   s += " screen="; s += Display::screen() ? "on" : "off";
+  s += " sleep=";  s += Sleep::describe();
   s += " flip=";   s += Display::flip() ? "on" : "off";
   s += " mirror="; s += Display::mirror() ? "on" : "off";
   s += " sw=";      s += Display::swRunning() ? "run" : "stop";
@@ -49,7 +51,8 @@ static String helpText() {
     "text <msg> | mode text|stopwatch|clock | "
     "scroll on|off|auto | align left|center|right | font normal|narrow | "
     "speed <ms> | bright <0-15> | "
-    "screen on|off|toggle | flip on|off | mirror on|off | hw <0-7> | "
+    "screen on|off|toggle | sleep HH:MM HH:MM [dim]|off | "
+    "flip on|off | mirror on|off | hw <0-7> | "
     "sw start|stop|toggle|reset | clock hmbar|hmblink|ms|hms|custom|font stock|big | "
     "tz <posix> | "
     "wifi status|set <ssid> [pass]|clear|portal | status | reboot");
@@ -110,7 +113,34 @@ String handle(const String &raw) {
     return String("OK align ") + Display::justifyName();
   }
 
-  // Screen power - for turning the panel off overnight without unplugging it.
+  // Sleep schedule - blank or dim the panel between two times of day.
+  if (verb == "sleep") {
+    String v = rest; v.toLowerCase();
+    if (v.isEmpty() || v == "status")
+      return String("sleep ") + Sleep::describe() +
+             "  (sleep HH:MM HH:MM [dim 0-15] | sleep off)";
+    if (v == "off" || v == "disable") {
+      Sleep::disable();
+      return "OK sleep disabled";
+    }
+
+    String a, restb, b, dimStr;
+    splitRaw(rest, a, restb);
+    splitRaw(restb, b, dimStr);
+
+    const int s1 = Sleep::parseHHMM(a);
+    const int s2 = Sleep::parseHHMM(b);
+    if (s1 < 0 || s2 < 0) return "ERR sleep HH:MM HH:MM [dim 0-15] | sleep off";
+
+    int dim = -1;                       // default: blank the screen
+    if (dimStr.length()) {
+      dim = dimStr.toInt();
+      if (dim < 0 || dim > 15) return "ERR dim must be 0-15";
+    }
+    if (!Sleep::set(s1, s2, dim)) return "ERR start and end must differ";
+    return String("OK sleep ") + Sleep::describe();
+  }
+
   if (verb == "screen" || verb == "display") {
     String v = rest; v.toLowerCase();
     if      (v == "on")     Display::setScreen(true);
